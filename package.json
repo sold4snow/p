@@ -3,8 +3,16 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types"
+	},
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "wrangler": "^4.37.0"
   },
   "peerDependencies": {
     "typescript": "^5"
