@@ -36,7 +36,7 @@ export default {
     if (request.headers.get('Upgrade') === atob('d2Vic29ja2V0')) {
       return await handleWsRequest(request, uuid, url.searchParams.get('rp'))
     }
-    return new Response('hello', { status: 200 })
+    return new Response(JSON.stringify(request.cf, null, 2), { status: 200 })
   },
 }
 
@@ -74,8 +74,6 @@ const E_EMPTY_ADDR = atob('YWRkcmVzc1ZhbHVlIGlzIGVtcHR5')
 const E_WS_NOT_OPEN = atob('d2ViU29ja2V0LmVhZHlTdGF0ZSBpcyBub3Qgb3Blbg==')
 const E_INVALID_ID_STR = atob('U3RyaW5naWZpZWQgaWRlbnRpZmllciBpcyBpbnZhbGlk')
 
-let isSocksEnabled = false
-
 const ADDRESS_TYPE_IPV4 = 1
 const ADDRESS_TYPE_URL = 2
 const ADDRESS_TYPE_IPV6 = 3
@@ -91,17 +89,15 @@ async function handleWsRequest(request: any, user: string, _p: any) {
   serverSock!.accept()
 
   let remoteConnWrapper: any = { socket: null }
-  let isDnsQuery = false
   let protocolType: any = null
 
-  const earlyData = request.headers.get(atob('c2VjLXdlYnNvY2tldC1wcm90b2NvbA==')) || ''
-  const readable = makeReadableStream(serverSock, earlyData)
+  const earlyData = request.headers.get(d(e('sec-websocket-protocol'))) || ''
+  const readable = makeReadableStream(serverSock!, earlyData)
 
   readable
     .pipeTo(
       new WritableStream({
         async write(chunk) {
-          if (isDnsQuery) return await forwardUDP(chunk, serverSock, null)
           if (remoteConnWrapper.socket) {
             const writer = remoteConnWrapper.socket.writable.getWriter()
             await writer.write(chunk)
@@ -116,12 +112,10 @@ async function handleWsRequest(request: any, user: string, _p: any) {
                 protocolType = d(e('vless'))
                 const { addressType, port, hostname, rawIndex, version, isUDP } = vlessResult
                 if (isUDP) {
-                  if (port === 53) isDnsQuery = true
-                  else throw new Error(E_UDP_DNS_ONLY)
+                  throw new Error(E_UDP_DNS_ONLY)
                 }
                 const respHeader = new Uint8Array([version![0]!, 0])
                 const rawData = chunk.slice(rawIndex)
-                if (isDnsQuery) return forwardUDP(rawData, serverSock, respHeader)
                 await forwardTCP(addressType, hostname, port, rawData, serverSock, respHeader, remoteConnWrapper)
                 return
               }
@@ -221,11 +215,13 @@ function parseWsPacketHeader(chunk: any, token: any) {
   return { hasError: false, addressType, port, hostname, isUDP, rawIndex: addrValIdx + addrLen, version }
 }
 
-function makeReadableStream(socket: any, earlyDataHeader: any) {
+function makeReadableStream(socket: WebSocket, earlyDataHeader: string) {
   let cancelled = false
+  console.log('ws type', socket.binaryType)
   return new ReadableStream({
     start(controller) {
       socket.addEventListener('message', (event: any) => {
+        console.log('message type', typeof event.data)
         if (!cancelled) controller.enqueue(event.data)
       })
       socket.addEventListener('close', () => {
@@ -235,9 +231,11 @@ function makeReadableStream(socket: any, earlyDataHeader: any) {
         }
       })
       socket.addEventListener('error', (err: any) => controller.error(err))
-      const { earlyData, error } = base64ToArray(earlyDataHeader)
-      if (error) controller.error(error)
-      else if (earlyData) controller.enqueue(earlyData)
+      try {
+        earlyDataHeader && controller.enqueue(Uint8Array.fromBase64(earlyDataHeader, { alphabet: 'base64url'}).buffer)
+      } catch (error: any) {
+        controller.error(error)
+      }
     },
     cancel() {
       cancelled = true
@@ -269,40 +267,6 @@ async function connectStreams(remoteSocket: any, webSocket: any, headerData: any
       closeSocketQuietly(webSocket)
     })
   if (!hasData && retryFunc) retryFunc()
-}
-
-async function forwardUDP(udpChunk: any, webSocket: any, respHeader: any) {
-  try {
-    const tcpSocket = connect({ hostname: '8.8.4.4', port: 53 })
-    let header = respHeader
-    const writer = tcpSocket.writable.getWriter()
-    await writer.write(udpChunk)
-    writer.releaseLock()
-    await tcpSocket.readable.pipeTo(
-      new WritableStream({
-        async write(chunk) {
-          if (webSocket.readyState === 1) {
-            if (header) {
-              webSocket.send(await new Blob([header, chunk]).arrayBuffer())
-              header = null
-            } else {
-              webSocket.send(chunk)
-            }
-          }
-        },
-      })
-    )
-  } catch (error) {}
-}
-
-function base64ToArray(b64Str: string) {
-  if (!b64Str) return { error: null }
-  try {
-    b64Str = b64Str.replace(/-/g, '+').replace(/_/g, '/')
-    return { earlyData: Uint8Array.from(atob(b64Str), (c) => c.charCodeAt(0)).buffer, error: null }
-  } catch (error) {
-    return { error }
-  }
 }
 
 function closeSocketQuietly(socket: any) {
