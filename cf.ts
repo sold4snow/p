@@ -4,24 +4,10 @@ const decoder = new TextDecoder('utf-8')
 function d(b: string) {
   return decoder.decode(Uint8Array.fromBase64(b))
 }
-// {"epd":"no","epi":"yes","egi":"no","ipv4":"yes","ipv6":"yes","ispMobile":"no","ispUnicom":"yes","ispTelecom":"no","dkby":"yes","rm":"no","ev":"yes","et":"no","ex":"no","wk":"US"}
-
-let reverseProxyIPs = [
-  { domain: '2602:fc59:b0:64::', desc: d(e('net64 兜底')), id: 'net64' },
-  { domain: d(e('proxyip.us.cmliussss.net')), desc: d(e('🇺🇸 美国中转')), id: 'US' },
-  { domain: d(e('proxyip.sg.cmliussss.net')), desc: d(e('🇸🇬 新加坡中转')), id: 'SG' },
-  { domain: d(e('proxyip.jp.cmliussss.net')), desc: d(e('🇯🇵 日本中转')), id: 'JP' },
-  { domain: d(e('proxyip.kr.cmliussss.net')), desc: d(e('🇰🇷 韩国中转')), id: 'KR' },
-  { domain: d(e('proxyip.de.cmliussss.net')), desc: d(e('🇩🇪 德国中转')), id: 'DE' },
-  { domain: d(e('proxyip.se.cmliussss.net')), desc: d(e('🇸🇪 瑞典中转')), id: 'SE' },
-  { domain: d(e('proxyip.nl.cmliussss.net')), desc: d(e('🇳🇱 荷兰中转')), id: 'NL' },
-  { domain: d(e('proxyip.fi.cmliussss.net')), desc: d(e('🇫🇮 芬兰中转')), id: 'FI' },
-  { domain: d(e('proxyip.gb.cmliussss.net')), desc: d(e('🇬🇧 英国中转')), id: 'GB' },
-  { domain: d(e('proxyip.oracle.cmliussss.net')), desc: d(e('Oracle中转')), id: 'Oracle' },
-  { domain: d(e('proxyip.digitalocean.cmliussss.net')), desc: d(e('DigitalOcean中转')), id: 'DigitalOcean' },
-  { domain: d(e('proxyip.vultr.cmliussss.net')), desc: d(e('Vultr中转')), id: 'Vultr' },
-  { domain: d(e('proxyip.multacom.cmliussss.net')), desc: d(e('Multacom中转')), id: 'Multacom' },
-]
+const encoder = new TextEncoder()
+function ee(s: string) {
+  return Uint8Array.from(encoder.encode(s)).toBase64()
+}
 
 export default {
   async fetch(request: Request, env: Record<string, string>) {
@@ -34,7 +20,7 @@ export default {
       return handleSubscriptionRequest(uuid, url.hostname, url.searchParams.get('ip') || url.hostname)
     }
     if (request.headers.get('Upgrade') === atob('d2Vic29ja2V0')) {
-      return await handleWsRequest(request, uuid, url.searchParams.get('rp'))
+      return await handleWsRequest(request, uuid, url.searchParams.get('p') || '')
     }
     return new Response(JSON.stringify(request.cf, null, 2), { status: 200 })
   },
@@ -44,25 +30,45 @@ async function handleSubscriptionRequest(user: string, sni: string, ip: string) 
   const wsPath = d(e('/?ed=2048'))
   const proto = d(e('vless'))
 
-  const links = reverseProxyIPs.map(
-    (c) =>
-      `${proto}://${user}@${ip}:${443}?${new URLSearchParams({
-        encryption: 'none',
-        security: 'tls',
-        sni: sni,
-        fp: 'chrome',
-        type: 'ws',
-        host: sni,
-        path: wsPath + (c.id ? `&rp=${c.id}` : ''),
-      }).toString()}#${encodeURIComponent(c.desc)}`
-  )
+  const usProxyIP = (await doh(d(e('proxyip.us.cmliussss.net'))))[0] || ''
+  if (!usProxyIP) {
+    return new Response(d(e('无法解析美国中转地址')), { status: 500 })
+  }
+  const sub = `${proto}://${user}@${ip}:${443}?${new URLSearchParams({
+    encryption: 'none',
+    security: 'tls',
+    sni: sni,
+    fp: 'chrome',
+    type: 'ws',
+    host: sni,
+    path:  `${wsPath}&p=${usProxyIP}`,
+  }).toString()}#`
+  const links = [d(e('美国 fallback')), `ip: ${usProxyIP}`].map(desc =>  sub + encodeURIComponent(desc))
 
-  return new Response(btoa(links.join('\n')), {
+  const content = ee(links.join('\n'))
+
+  return new Response(content, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
       'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
     },
   })
+}
+
+async function doh(domain: string): Promise<string[]> {
+  const resp = await fetch(`https://1.1.1.1/dns-query?name=${domain}&type=A`, {
+    headers: {
+      Accept: 'application/dns-json',
+    },
+  })
+  if (!resp.ok) {
+    return []
+  }
+  const data: any = await resp.json()
+  if (data.Answer && Array.isArray(data.Answer)) {
+    return data.Answer.filter((ans: any) => ans.type === 1).map((ans: any) => ans.data)
+  }
+  return []
 }
 
 const E_INVALID_DATA = atob('aW52YWxpZCBkYXRh')
@@ -83,7 +89,7 @@ function isValidFormat(str: any) {
   return userRegex.test(str)
 }
 
-async function handleWsRequest(request: any, user: string, _p: any) {
+async function handleWsRequest(request: any, user: string, proxyIp: string) {
   const wsPair = new WebSocketPair()
   const [clientSock, serverSock] = Object.values(wsPair)
   serverSock!.accept()
@@ -116,12 +122,12 @@ async function handleWsRequest(request: any, user: string, _p: any) {
                 }
                 const respHeader = new Uint8Array([version![0]!, 0])
                 const rawData = chunk.slice(rawIndex)
-                await forwardTCP(addressType, hostname, port, rawData, serverSock, respHeader, remoteConnWrapper)
+                await forwardTCP(addressType, hostname!, port, rawData, serverSock, respHeader, remoteConnWrapper, proxyIp)
                 return
               }
             }
 
-            throw new Error('Invalid protocol or authentication failed')
+            throw new Error(d(e('Invalid protocol or authentication failed')))
           }
         },
       })
@@ -131,7 +137,7 @@ async function handleWsRequest(request: any, user: string, _p: any) {
   return new Response(null, { status: 101, webSocket: clientSock })
 }
 
-async function forwardTCP(addrType: any, host: any, portNum: any, rawData: any, ws: any, respHeader: any, remoteConnWrapper: any) {
+async function forwardTCP(addrType: any, host: string, portNum: any, rawData: any, ws: any, respHeader: any, remoteConnWrapper: any, proxyIp: string) {
   async function connectAndSend(address: any, port: any) {
     const remoteSock = connect({ hostname: address, port: port })
     const writer = remoteSock.writable.getWriter()
@@ -141,33 +147,24 @@ async function forwardTCP(addrType: any, host: any, portNum: any, rawData: any, 
   }
 
   let retryConnection: any = undefined
-  // async function retryConnection() {
-  //     let backupHost, backupPort
-  //     if (fallbackAddress && fallbackAddress.trim() && fallbackPort) {
-  //       backupHost = fallbackAddress
-  //       backupPort = parseInt(fallbackPort, 10) || portNum
-  //     } else {
-  //       const bestBackupIP = await getBestBackupIP(currentWorkerRegion)
-  //       backupHost = bestBackupIP ? bestBackupIP.domain : host
-  //       backupPort = bestBackupIP ? bestBackupIP.port : portNum
-  //     }
-
-  //     try {
-  //       const fallbackSocket = await connectAndSend(backupHost, backupPort, isSocksEnabled)
-  //       remoteConnWrapper.socket = fallbackSocket
-  //       fallbackSocket.closed.catch(() => {}).finally(() => closeSocketQuietly(ws))
-  //       connectStreams(fallbackSocket, ws, respHeader, null)
-  //     } catch (fallbackErr) {
-  //       closeSocketQuietly(ws)
-  //     }
-  // }
-
+  if (proxyIp && proxyIp.trim()) {
+    retryConnection = async function retryConnection() {
+      try {
+        const proxySocket = await connectAndSend(proxyIp, 443)
+        remoteConnWrapper.socket = proxySocket
+        proxySocket.closed.catch(() => {}).finally(() => closeSocketQuietly(ws))
+        connectStreams(proxySocket, ws, respHeader, null)
+      } catch (proxyErr) {
+        closeSocketQuietly(ws)
+      }
+    }
+  }
   try {
     const initialSocket = await connectAndSend(host, portNum)
     remoteConnWrapper.socket = initialSocket
     connectStreams(initialSocket, ws, respHeader, retryConnection)
   } catch (err) {
-    retryConnection()
+    retryConnection ? retryConnection() : closeSocketQuietly(ws)
   }
 }
 
@@ -217,11 +214,9 @@ function parseWsPacketHeader(chunk: any, token: any) {
 
 function makeReadableStream(socket: WebSocket, earlyDataHeader: string) {
   let cancelled = false
-  console.log('ws type', socket.binaryType)
   return new ReadableStream({
     start(controller) {
       socket.addEventListener('message', (event: any) => {
-        console.log('message type', typeof event.data)
         if (!cancelled) controller.enqueue(event.data)
       })
       socket.addEventListener('close', () => {
