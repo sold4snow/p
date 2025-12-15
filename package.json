@@ -8,7 +8,8 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+    "build-pages": "bun build cf.ts --outfile cf/_worker.js --minify -e cloudflare:sockets"
 	},
   "devDependencies": {
     "@types/bun": "latest",
